@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Target Hunt Enhanced</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Orbitron', sans-serif;
+      background: black;
+    }
+    canvas {
+      display: block;
+    }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      z-index: 10;
+    }
+    #ui div {
+      margin-bottom: 5px;
+      font-size: 18px;
+    }
+    .crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 15px;
+      height: 15px;
+      background: transparent;
+      border: 2px solid white;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      transition: border-color 0.2s;
+      z-index: 5;
+    }
+    .shoot-button {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 80px;
+      height: 80px;
+      background: rgba(255, 0, 0, 0.7);
+      border: none;
+      border-radius: 50%;
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      z-index: 10;
+    }
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>Score: <span id="score">0</span></div>
+    <div>Time: <span id="time">30</span>s</div>
+    <div>Level: <span id="level">1</span></div>
+  </div>
+  <div class="crosshair"></div>
+  <button class="shoot-button">Shoot</button>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.min.js"></script>
+  <script>
+    // Three.js Setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Background
+    const textureLoader = new THREE.TextureLoader();
+    const backgroundTexture = textureLoader.load('https://cdn.pixabay.com/photo/2016/03/09/15/30/stars-1245988_1280.jpg');
+    scene.background = backgroundTexture;
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    const spotLight = new THREE.SpotLight(0xffffff, 1);
+    spotLight.position.set(0, 50, 50);
+    scene.add(spotLight);
+
+    // Camera Position
+    camera.position.z = 15;
+
+    // Camera Movement Variables
+    let isDragging = false;
+    let previousMousePosition = { x: 0, y: 0 };
+    const cameraSensitivity = 0.005;
+
+    // Game Variables
+    let score = 0;
+    let timeLeft = 30;
+    let level = 1;
+    let targets = [];
+    let targetSpawnInterval = 1000;
+    let multiplier = 1;
+    let lastHitTime = 0;
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2(0, 0);
+
+    const scoreDisplay = document.getElementById("score");
+    const timeDisplay = document.getElementById("time");
+    const levelDisplay = document.getElementById("level");
+
+    // Spawn Targets
+    function spawnTarget() {
+      const targetMaterial = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
+      const targetGeometry = new THREE.SphereGeometry(0.7, 32, 32);
+      const target = new THREE.Mesh(targetGeometry, targetMaterial);
+
+      target.position.set(
+        (Math.random() - 0.5) * 48,
+        (Math.random() - 0.5) * 24,
+        -(Math.random() * 48)
+      );
+
+      scene.add(target);
+      targets.push(target);
+
+      setTimeout(() => {
+        if (targets.includes(target)) {
+          scene.remove(target);
+          targets = targets.filter(t => t !== target);
+        }
+      }, Math.max(1000, 5000 - level * 100));
+
+      setTimeout(spawnTarget, Math.max(500, targetSpawnInterval - level * 50));
+    }
+
+    // Shooting Logic
+    document.querySelector(".shoot-button").addEventListener("click", () => {
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(targets);
+      if (intersects.length > 0) {
+        const target = intersects[0].object;
+        scene.remove(target);
+        targets = targets.filter(t => t !== target);
+        score += 10 * multiplier;
+        scoreDisplay.textContent = score;
+        timeLeft += 2;
+        timeDisplay.textContent = timeLeft;
+
+        // Combo
+        const now = Date.now();
+        if (now - lastHitTime < 2000) multiplier++;
+        else multiplier = 1;
+        lastHitTime = now;
+      }
+    });
+
+    // Drag-to-Look Controls
+    function handleCameraRotation(event) {
+      const deltaX = event.clientX - previousMousePosition.x;
+      const deltaY = event.clientY - previousMousePosition.y;
+
+      camera.rotation.y -= deltaX * cameraSensitivity; // Horizontal rotation
+      camera.rotation.x -= deltaY * cameraSensitivity; // Vertical rotation
+
+      // Limit vertical rotation to prevent flipping
+      camera.rotation.x = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, camera.rotation.x));
+
+      previousMousePosition = { x: event.clientX, y: event.clientY };
+    }
+
+    document.addEventListener("mousedown", (event) => {
+      isDragging = true;
+      previousMousePosition = { x: event.clientX, y: event.clientY };
+    });
+
+    document.addEventListener("mousemove", (event) => {
+      if (isDragging) handleCameraRotation(event);
+    });
+
+    document.addEventListener("mouseup", () => {
+      isDragging = false;
+    });
+
+    // Touch Controls for Mobile
+    document.addEventListener("touchstart", (event) => {
+      isDragging = true;
+      const touch = event.touches[0];
+      previousMousePosition = { x: touch.clientX, y: touch.clientY };
+    });
+
+    document.addEventListener("touchmove", (event) => {
+      if (isDragging) {
+        const touch = event.touches[0];
+        handleCameraRotation({ clientX: touch.clientX, clientY: touch.clientY });
+      }
+    });
+
+    document.addEventListener("touchend", () => {
+      isDragging = false;
+    });
+
+    // Timer
+    setInterval(() => {
+      timeLeft--;
+      timeDisplay.textContent = timeLeft;
+      if (timeLeft <= 0) alert(`Game Over! Score: ${score}`);
+    }, 1000);
+
+    // Animate
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+
+    animate();
+    spawnTarget();
+  </script>
+</body>
+</html>
