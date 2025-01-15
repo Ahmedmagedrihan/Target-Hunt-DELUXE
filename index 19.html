@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Target Hunt Enhanced</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Orbitron', sans-serif;
+      background: radial-gradient(circle at center, #1a2a6c, #b21f1f, #fdbb2d);
+    }
+    canvas {
+      display: block;
+    }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      z-index: 10;
+    }
+    #ui div {
+      margin-bottom: 5px;
+      font-size: 22px;
+      text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+    }
+    .crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 25px;
+      height: 25px;
+      border: 2px solid white;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      animation: pulse 1s infinite;
+      z-index: 5;
+    }
+    .shoot-button {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 100px;
+      height: 100px;
+      background: rgba(255, 69, 0, 0.8);
+      border: none;
+      border-radius: 50%;
+      color: white;
+      font-size: 22px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 0 15px rgba(255, 69, 0, 0.7);
+      z-index: 10;
+      transition: transform 0.2s, background 0.2s;
+    }
+    .shoot-button:active {
+      transform: scale(0.9);
+      background: rgba(255, 0, 0, 0.9);
+    }
+    @keyframes pulse {
+      0% {
+        transform: translate(-50%, -50%) scale(1);
+      }
+      50% {
+        transform: translate(-50%, -50%) scale(1.1);
+      }
+      100% {
+        transform: translate(-50%, -50%) scale(1);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>Score: <span id="score">0</span></div>
+    <div>Time: <span id="time">30</span>s</div>
+    <div>Level: <span id="level">1</span></div>
+  </div>
+  <div class="crosshair"></div>
+  <button class="shoot-button">Shoot</button>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.min.js"></script>
+  <script>
+    // Three.js Setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Background
+    const textureLoader = new THREE.TextureLoader();
+    const backgroundTexture = textureLoader.load('https://cdn.pixabay.com/photo/2016/03/09/15/30/stars-1245988_1280.jpg');
+    scene.background = backgroundTexture;
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    const spotLight = new THREE.SpotLight(0xffffff, 1.5);
+    spotLight.position.set(0, 50, 50);
+    spotLight.castShadow = true;
+    scene.add(spotLight);
+
+    // Camera Position
+    camera.position.z = 15;
+
+    // Game Variables
+    let score = 0;
+    let timeLeft = 30;
+    let level = 1;
+    let targets = [];
+    const targetSpawnInterval = 1000;
+
+    const scoreDisplay = document.getElementById("score");
+    const timeDisplay = document.getElementById("time");
+    const levelDisplay = document.getElementById("level");
+
+    const raycaster = new THREE.Raycaster();
+
+    // Camera Controls
+    let isDragging = false;
+    let lastTouch = { x: 0, y: 0 };
+
+    function handleCameraRotation(deltaX, deltaY) {
+      camera.rotation.y -= deltaX * 0.005; // Horizontal rotation
+      camera.rotation.x -= deltaY * 0.005; // Vertical rotation
+
+      // Limit vertical rotation to prevent flipping
+      camera.rotation.x = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, camera.rotation.x));
+    }
+
+    // Mouse Events
+    document.addEventListener("mousedown", (e) => {
+      isDragging = true;
+      lastTouch = { x: e.clientX, y: e.clientY };
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isDragging) return;
+      const deltaX = e.clientX - lastTouch.x;
+      const deltaY = e.clientY - lastTouch.y;
+      handleCameraRotation(deltaX, deltaY);
+      lastTouch = { x: e.clientX, y: e.clientY };
+    });
+
+    document.addEventListener("mouseup", () => (isDragging = false));
+
+    // Touch Events for Mobile
+    document.addEventListener("touchstart", (e) => {
+      isDragging = true;
+      lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    });
+
+    document.addEventListener("touchmove", (e) => {
+      if (!isDragging) return;
+      const deltaX = e.touches[0].clientX - lastTouch.x;
+      const deltaY = e.touches[0].clientY - lastTouch.y;
+      handleCameraRotation(deltaX, deltaY);
+      lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    });
+
+    document.addEventListener("touchend", () => (isDragging = false));
+
+    // Blue Explosion Effect
+    function createExplosion(position) {
+      const particles = [];
+      const particleGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+      const particleMaterial = new THREE.MeshStandardMaterial({ color: 0x3399ff, emissive: 0x0033ff });
+
+      for (let i = 0; i < 20; i++) {
+        const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+        particle.position.copy(position);
+        particle.velocity = new THREE.Vector3(
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 2
+        );
+        scene.add(particle);
+        particles.push(particle);
+      }
+
+      const explosionDuration = 1000; // 1 second
+      const startTime = Date.now();
+
+      function animateExplosion() {
+        const elapsedTime = Date.now() - startTime;
+        if (elapsedTime > explosionDuration) {
+          particles.forEach(p => scene.remove(p));
+          return;
+        }
+
+        particles.forEach(p => {
+          p.position.add(p.velocity.clone().multiplyScalar(0.1));
+          p.material.opacity = 1 - elapsedTime / explosionDuration;
+        });
+
+        requestAnimationFrame(animateExplosion);
+      }
+      animateExplosion();
+    }
+
+    // Target Spawning
+    function spawnTarget() {
+      const material = new THREE.MeshStandardMaterial({
+        color: Math.random() * 0xffffff,
+        emissive: Math.random() * 0xffffff,
+        emissiveIntensity: 0.5,
+      });
+      const geometry = new THREE.SphereGeometry(0.7, 32, 32);
+      const target = new THREE.Mesh(geometry, material);
+
+      target.position.set(
+        (Math.random() - 0.5) * 48,
+        (Math.random() - 0.5) * 24,
+        -(Math.random() * 48)
+      );
+
+      scene.add(target);
+      targets.push(target);
+
+      setTimeout(() => {
+        if (targets.includes(target)) {
+          scene.remove(target);
+          targets = targets.filter(t => t !== target);
+        }
+      }, 5000);
+    }
+
+    setInterval(() => spawnTarget(), targetSpawnInterval);
+
+    // Shooting Logic
+    document.querySelector(".shoot-button").addEventListener("click", () => {
+      raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+      const intersects = raycaster.intersectObjects(targets);
+      if (intersects.length > 0) {
+        const target = intersects[0].object;
+        createExplosion(target.position);
+        scene.remove(target);
+        targets = targets.filter(t => t !== target);
+
+        score += 10;
+        scoreDisplay.textContent = score;
+        timeLeft += 2; // Add 2 seconds instantly
+        timeDisplay.textContent = timeLeft;
+      }
+    });
+
+    // Timer
+    setInterval(() => {
+      timeLeft--;
+      timeDisplay.textContent = timeLeft;
+      if (timeLeft <= 0) {
+        alert(`Game Over! Final Score: ${score}`);
+        location.reload();
+      }
+    }, 1000);
+
+    // Animate
+    function animate() {
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  </script>
+</body>
+</html>
